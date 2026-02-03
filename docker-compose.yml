@@ -1,0 +1,31 @@
+version: '3.8'
+
+services:
+  qdrant:
+    image: qdrant/qdrant:latest
+    ports:
+      - "6333:6333"
+      - "6334:6334"
+    volumes:
+      - ./data/qdrant_storage:/qdrant/storage
+    restart: always
+
+  redis:
+    image: redis:alpine
+    ports:
+      - "6379:6379"
+    restart: always
+
+  # 注意: Firecrawl 官方建議 Clone 原始碼執行 docker-compose。
+  # 若此 Image 無法正常運作，請參考 https://github.com/mendableai/firecrawl
+  # 並使用 'git clone' 後執行其 docker-compose，再將本 App 連線至 http://localhost:3002
+  
+  # firecrawl:
+  #   image: mendableai/firecrawl:latest
+  #   ports:
+  #     - "3002:3002"
+  #   environment:
+  #     - REDIS_URL=redis://redis:6379
+  #     - USE_DB_AUTHENTICATION=false
+  #   depends_on:
+  #     - redis

@@ -1,0 +1,65 @@
+{
+  "papers": [
+    {
+      "name": "arXiv CS.CL",
+      "url": "https://arxiv.org/list/cs.CL/recent",
+      "description": "Computation and Language (NLP) recent papers"
+    },
+    {
+      "name": "arXiv CS.LG",
+      "url": "https://arxiv.org/list/cs.LG/recent",
+      "description": "Machine Learning recent papers"
+    },
+    {
+      "name": "Hugging Face Daily Papers",
+      "url": "https://huggingface.co/papers",
+      "description": "Daily curated papers by Hugging Face"
+    }
+  ],
+  "trending": [
+    {
+      "name": "GitHub Trending",
+      "url": "https://github.com/trending",
+      "description": "Trending repositories on GitHub"
+    },
+    {
+      "name": "Hugging Face Models",
+      "url": "https://huggingface.co/models?sort=trending",
+      "description": "Trending models on Hugging Face"
+    }
+  ],
+  "community": [
+    {
+      "name": "Reddit r/LocalLLaMA",
+      "url": "https://www.reddit.com/r/LocalLLaMA/",
+      "description": "Local LLaMA community discussions"
+    },
+    {
+      "name": "Hacker News",
+      "url": "https://news.ycombinator.com/",
+      "description": "Tech news and discussions"
+    }
+  ],
+  "blogs": [
+    {
+      "name": "Anthropic Blog",
+      "url": "https://www.anthropic.com/news",
+      "description": "Official Anthropic news"
+    },
+    {
+      "name": "Google DeepMind Blog",
+      "url": "https://deepmind.google/discover/blog/",
+      "description": "Google DeepMind research blog"
+    },
+    {
+      "name": "Meta AI Blog",
+      "url": "https://ai.meta.com/blog/",
+      "description": "Meta AI research blog"
+    },
+    {
+      "name": "Amazon Science Blog",
+      "url": "https://www.amazon.science/blog",
+      "description": "Amazon Science blog"
+    }
+  ]
+}

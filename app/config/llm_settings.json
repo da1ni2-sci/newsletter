@@ -1,0 +1,32 @@
+{
+    "default": {
+        "provider": "Ollama (本地端)",
+        "api_key": "",
+        "base_url": "https://api.deepseek.com",
+        "model_name": "gpt-5.2-2025-12-11"
+    },
+    "aggregation": {
+        "provider": "OpenAI (API)",
+        "model_name": "gpt-5-mini-2025-08-07"
+    },
+    "editor": {
+        "provider": "OpenAI (API)",
+        "model_name": "gpt-5-mini-2025-08-07"
+    },
+    "newsletter": {
+        "provider": "OpenAI (API)",
+        "model_name": "gpt-5-mini-2025-08-07"
+    },
+    "chief_editor": {
+        "provider": "OpenAI (API)",
+        "model_name": "gpt-5.2-2025-12-11"
+    },
+    "tagging": {
+        "provider": "OpenAI (API)",
+        "model_name": "gpt-5-mini-2025-08-07"
+    },
+    "cluster_refinement": {
+        "provider": "OpenAI (API)",
+        "model_name": "gpt-5-mini-2025-08-07"
+    }
+}
