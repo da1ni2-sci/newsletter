@@ -1,9 +1,9 @@
 {
     "default": {
-        "provider": "Ollama (本地端)",
+        "provider": "OpenAI (API)",
         "api_key": "",
         "base_url": "https://api.deepseek.com",
-        "model_name": "gpt-5.2-2025-12-11"
+        "model_name": "gpt-5-nano"
     },
     "aggregation": {
         "provider": "OpenAI (API)",

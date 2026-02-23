@@ -33,6 +33,8 @@ try:
     from app.agents.chief_editor_agent import ChiefEditorAgent # 新增
     from app.core.token_tracker import TokenTracker 
     from app.config.llm_config import LLMConfigManager # New Config Manager
+    from app.adapters.db_adapter import SubscriberDatabase # 新增
+    from app.tools.email_tool import EmailDeliveryTool # 新增
 except ImportError as e:
     st.error(f"Import Error: {e}")
     st.stop()
@@ -226,85 +228,7 @@ def render_purification_stats(dist, read_only=False):
                     st.markdown(f"- **{art['title']}** [連結]({art['link']})")
 
 # --- Tabs ---
-tab1, tab2, tab3, tab4, tab5 = st.tabs(["📡 資料抓取", "🧠 LLM 測試", "🧬 向量嵌入測試", "🗄️ 向量資料庫", "📰 生成電子報"])
-
-# --- TAB 1: Ingestion ---
-with tab1:
-    st.header("資料來源抓取")
-    # ... (existing tab1 code)
-    
-# --- TAB 2: LLM Test ---
-with tab2:
-    st.header("🧠 LLM 供應商測試")
-    test_agent_profile = st.selectbox("選擇要測試的配置 (Agent Profile)", ["default", "tagging", "aggregation", "cluster_refinement", "editor", "newsletter", "chief_editor"])
-    
-    st.info(f"當前測試目標: **{test_agent_profile}**")
-    
-    test_prompt = st.text_area("測試指令 (Prompt)", value="請用繁體中文自我介紹，並解釋你擅長處理什麼樣的任務。 সন")
-    test_system = st.text_input("系統指令 (System Prompt)", value="You are a helpful technical assistant.")
-    
-    if st.button("🚀 執行測試", type="primary"):
-        async def run_test():
-            try:
-                llm = get_llm_for_agent(test_agent_profile)
-                
-                with st.spinner("正在等待模型回應..."):
-                    response = await llm.generate(prompt=test_prompt, system_prompt=test_system)
-                    log_tokens("LLM Test", llm)
-                    
-                    st.subheader("🤖 模型回應")
-                    st.markdown(response)
-                    
-                    if hasattr(llm, 'last_usage'):
-                        st.success(f"消耗: {llm.last_usage.get('prompt_tokens', 0)} (P) / {llm.last_usage.get('completion_tokens', 0)} (C) tokens")
-            except Exception as e:
-                st.error(f"測試失敗: {e}")
-        
-        asyncio.run(run_test())
-
-# --- TAB 3: Embedding Test ---
-with tab3:
-    st.header("🧬 向量嵌入測試 (Qwen3)")
-    st.info("當前模型: **qwen3-embedding:latest** (經由 Ollama)")
-    
-    col_emb1, col_emb2 = st.columns(2)
-    text1 = col_emb1.text_area("文字 A", value="深度學習在電腦視覺中的應用", height=100)
-    text2 = col_emb2.text_area("文字 B", value="Deep Learning applications in CV", height=100)
-    
-    if st.button("🧬 執行嵌入與相似度計算", type="primary"):
-        async def run_emb_test():
-            try:
-                embedder = LocalEmbeddingProvider()
-                
-                with st.spinner("正在計算向量..."):
-                    vec1 = await embedder.embed_query(text1)
-                    vec2 = await embedder.embed_query(text2)
-                    
-                    st.divider()
-                    st.write(f"**向量 A 長度:** {len(vec1)}")
-                    st.write(f"**向量 B 長度:** {len(vec2)}")
-                    
-                    # 計算餘弦相似度
-                    import numpy as np
-                    v1 = np.array(vec1)
-                    v2 = np.array(vec2)
-                    similarity = np.dot(v1, v2) / (np.linalg.norm(v1) * np.linalg.norm(v2))
-                    
-                    # 歐幾里得距離 (我們的聚類算法使用的指標)
-                    distance = np.linalg.norm(v1/np.linalg.norm(v1) - v2/np.linalg.norm(v2))
-                    
-                    st.metric("餘弦相似度 (Cosine Similarity)", f"{similarity:.4f}")
-                    st.metric("歐幾里得距離 (Euclidean Distance)", f"{distance:.4f}")
-                    st.caption("註：距離越小越接近。當前聚類閾值參考值：0.5 ~ 1.5")
-                    
-                    with st.expander("查看原始向量 (前 10 碼)"):
-                        st.write(f"A: {vec1[:10]}...")
-                        st.write(f"B: {vec2[:10]}...")
-            except Exception as e:
-                st.error(f"嵌入測試失敗: {e}")
-                st.info("請確保 Ollama 已拉取 qwen3-embedding:latest 模型")
-        
-        asyncio.run(run_emb_test())
+tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(["📡 資料抓取", "🧠 LLM 測試", "🧬 向量嵌入測試", "🗄️ 向量資料庫", "📰 生成電子報", "✉️ 寄送電子報"])
 
 # --- TAB 1: Ingestion ---
 with tab1:
@@ -360,13 +284,14 @@ with tab1:
                             st.session_state['fetched_articles'], 
                             llm_tagging
                         )
+                        log_tokens("Intent Tagging", llm_tagging) # 補上紀錄
                         
                         # B. Auto-Tune
                         master_status.write("- 正在執行智慧閾值優化 (Auto-Tune)...")
                         agg_llm = get_llm_for_agent('aggregation')
                         
                         best_t, reasoning = await agg_agent.optimize_threshold(st.session_state['fetched_articles'], agg_llm)
-                        log_tokens("Aggregation Auto-Tune", agg_llm) # 紀錄
+                        log_tokens("Aggregation Auto-Tune", agg_llm) # 補上紀錄
                         
                         st.session_state['current_threshold'] = best_t
                         st.session_state['auto_tune_reasoning'] = reasoning
@@ -385,12 +310,18 @@ with tab1:
                             clusters, 
                             llm_refinement
                         )
+                        log_tokens("Cluster Refinement", llm_refinement) # 補上紀錄
                         st.session_state['topic_clusters'] = final_clusters
 
                         # 3. Editor Selection
                         master_status.write("### 🤖 階段 3: AI 總編選題")
                         editor_llm = get_llm_for_agent('editor')
-                        editor = EditorAgent(editor_llm)
+                        
+                        # --- Pass Vector Store for History Checking ---
+                        embedder = LocalEmbeddingProvider()
+                        vector_store = QdrantAdapter(host=qdrant_host, port=qdrant_port)
+                        editor = EditorAgent(editor_llm, vector_store=vector_store, embedding=embedder)
+                        # ----------------------------------------------
                         
                         # 擴大篩選候選人池：改為直接選取分數最高的 Top 50
                         candidates = sorted(final_clusters, key=lambda x: x.get('score', 0), reverse=True)[:50]
@@ -543,6 +474,7 @@ with tab1:
                             llm, 
                             progress_callback=ui_progress_callback
                         )
+                        log_tokens("Article Purification", llm) # 補上紀錄
                         
                         st.session_state['fetched_articles'] = purified
                         filtered_count = original_count - len(purified)
@@ -656,6 +588,7 @@ with tab1:
                         llm_tagging,
                         progress_callback=tag_callback
                     )
+                    log_tokens("Intent Tagging", llm_tagging) # 補上紀錄
                     st.session_state['fetched_articles'] = tagged_articles
                     st.success("✅ 意圖標籤生成完成！現在聚類效果將大幅提升。 সন")
                     st.rerun()
@@ -732,6 +665,7 @@ with tab1:
                             st.session_state['topic_clusters'], 
                             llm_refinement
                         )
+                        log_tokens("Cluster Refinement", llm_refinement) # 補上紀錄
                         st.session_state['topic_clusters'] = refined_clusters
                         st.success("✅ 主題整併完成！ সন")
                         st.rerun()
@@ -778,7 +712,13 @@ with tab1:
                 async def run_editor():
                     with st.status("AI 總編正在審閱候選主題...", expanded=True) as status:
                         editor_llm = get_llm_for_agent('editor')
-                        editor = EditorAgent(editor_llm)
+                        
+                        # --- Pass Vector Store for History Checking ---
+                        embedder = LocalEmbeddingProvider()
+                        vector_store = QdrantAdapter(host=qdrant_host, port=qdrant_port)
+                        editor = EditorAgent(editor_llm, vector_store=vector_store, embedding=embedder)
+                        # ----------------------------------------------
+                        
                         clusters = st.session_state['topic_clusters']
                         
                         # 1. 準備候選池
@@ -802,30 +742,49 @@ with tab1:
     if st.session_state.get('selected_topics'):
         st.markdown("---")
         st.header("Phase 2: 深度研究與導航")
-        if st.button("🚀 批量處理選中主題", use_container_width=True):
-            async def process_batch_p2():
-                with st.status("深度研究中...", expanded=True) as status:
-                    web_fetcher = LocalPlaywrightStrategy(headless=use_headless)
+        
+        col_p2_1, col_p2_2 = st.columns([3, 1])
+        with col_p2_1:
+            st.info("請勾選下方想要進行『深度研究』的主題，然後點擊右側按鈕開始批量處理。")
+        with col_p2_2:
+            if st.button("🚀 批量處理選中主題", use_container_width=True, type="primary"):
+                async def process_batch_p2():
+                    # 篩選出有勾選的主題索引
+                    selected_indices = [idx for idx, _ in enumerate(st.session_state['selected_topics']) 
+                                        if st.session_state.get(f"select_topic_{idx}", False)]
                     
-                    llm = get_llm_for_agent('editor')
-                    
-                    editor = EditorAgent(llm)
-                    for idx, topic in enumerate(st.session_state['selected_topics']):
-                        status.write(f"🔍 **處理中: {topic['representative_title']}**")
-                        for art in topic['articles']:
-                            if len(art.get('content', '') or art.get('summary', '')) < 5000:
-                                content = await web_fetcher.fetch_full_content(art['link'])
-                                if content: art['content'] = content
-                        st.session_state['selected_topics'][idx]['research_prompt'] = await editor.generate_research_prompt(topic)
-                        log_tokens("Research Prompt Generation", llm) # 紀錄
-                        st.session_state['selected_topics'][idx]['prompt_generated'] = True
-                    st.session_state['phase2_done'] = True
-                    st.rerun()
-            asyncio.run(process_batch_p2())
+                    if not selected_indices:
+                        st.warning("請先勾選至少一個主題！")
+                        return
+
+                    with st.status("深度研究中...", expanded=True) as status:
+                        web_fetcher = LocalPlaywrightStrategy(headless=use_headless)
+                        llm = get_llm_for_agent('editor')
+                        editor = EditorAgent(llm)
+                        
+                        for idx in selected_indices:
+                            topic = st.session_state['selected_topics'][idx]
+                            status.write(f"🔍 **處理中: {topic['representative_title']}**")
+                            for art in topic['articles']:
+                                if len(art.get('content', '') or art.get('summary', '')) < 5000:
+                                    content = await web_fetcher.fetch_full_content(art['link'])
+                                    if content: art['content'] = content
+                            st.session_state['selected_topics'][idx]['research_prompt'] = await editor.generate_research_prompt(topic)
+                            log_tokens("Research Prompt Generation", llm) # 紀錄
+                            st.session_state['selected_topics'][idx]['prompt_generated'] = True
+                        st.session_state['phase2_done'] = True
+                        st.rerun()
+                asyncio.run(process_batch_p2())
 
         for i, topic in enumerate(st.session_state['selected_topics']):
             done = "✅" if topic.get('prompt_generated') else "⬜"
-            with st.expander(f"{done} Topic {i+1}: {topic['representative_title']}", expanded=topic.get('prompt_generated', False)):
+            
+            # 使用 columns讓勾選框與 expander 並排
+            c1, c2 = st.columns([1, 20])
+            # 預設勾選尚未產生的項目
+            is_checked = c1.checkbox("選取", value=not topic.get('prompt_generated'), key=f"select_topic_{i}", label_visibility="collapsed")
+            
+            with c2.expander(f"{done} Topic {i+1}: {topic['representative_title']}", expanded=topic.get('prompt_generated', False)):
                 prompt = topic.get('research_prompt', '')
                 if prompt: st.code(prompt)
                 report_key = f"report_{i}_{topic.get('cluster_id', i)}"
@@ -901,7 +860,11 @@ with tab5:
                             # Also update the expandable status
                             status.write(msg)
 
-                        refined_md = await editor.refine_newsletter(st.session_state['final_newsletter'], progress_callback=refinement_callback)
+                        refined_md = await editor.refine_newsletter(
+                            st.session_state['final_newsletter'], 
+                            issue_number=st.session_state.get('current_issue_number', 'N/A'),
+                            progress_callback=refinement_callback
+                        )
                         log_tokens("Final Refinement", llm) # 紀錄 Token
                         
                         if not refined_md:
@@ -918,19 +881,258 @@ with tab5:
         if st.session_state.get('refined_newsletter'):
             st.divider()
             st.subheader("💎 最終拋光版本")
+            
+            # --- NEW: Issue Number Management ---
+            st.markdown("### 🏷️ 期刊號與存檔設定")
+            
+            # Calculate default issue number
+            def get_next_issue_number():
+                # Format: YYYY-MM-001
+                now = datetime.now()
+                year_month = now.strftime("%Y-%m")
+                
+                # Check cache for the last sequence number
+                history_path = os.path.join(project_root, "data", "issue_history.json")
+                if os.path.exists(history_path):
+                    try:
+                        with open(history_path, "r") as f:
+                            history = json.load(f)
+                            last_seq = history.get("last_seq", 0)
+                    except: last_seq = 0
+                else:
+                    last_seq = 0
+                
+                next_seq = last_seq + 1
+                return f"{year_month}-{next_seq:03d}"
+
+            if 'current_issue_number' not in st.session_state:
+                st.session_state['current_issue_number'] = get_next_issue_number()
+
+            col_issue1, col_issue2 = st.columns([2, 1])
+            st.session_state['current_issue_number'] = col_issue1.text_input("本期期刊號 (可手動修改)", value=st.session_state['current_issue_number'])
+            
+            if col_issue2.button("📦 完稿並存入向量庫", use_container_width=True, type="primary", help="將內容索引至 Qdrant，避免未來重複並建立延伸閱讀關聯"):
+                async def finalize_and_index():
+                    with st.spinner("正在將週報內容索引至向量資料庫..."):
+                        try:
+                            embedder = LocalEmbeddingProvider()
+                            vector_store = QdrantAdapter(host=qdrant_host, port=qdrant_port)
+                            
+                            # 1. Ensure collection exists (using 1536 for common models or check embedder)
+                            # Actually we need to get a sample vector to know the size
+                            sample_vec = await embedder.embed_query("test")
+                            collection_name = "finalized_newsletters"
+                            await vector_store.create_collection(collection_name, len(sample_vec))
+                            
+                            # 2. Chunk by topic
+                            content = st.session_state['refined_newsletter']
+                            # Split by ## headers (standard for our articles)
+                            topic_chunks = re.split(r'\n(?=## )', content)
+                            
+                            points = []
+                            for chunk in topic_chunks:
+                                if len(chunk.strip()) < 100: continue
+                                
+                                # Extract title from chunk
+                                first_line = chunk.strip().split('\n')[0]
+                                title = first_line.replace('##', '').strip()
+                                
+                                vector = await embedder.embed_query(chunk)
+                                point_id = str(uuid.uuid4())
+                                points.append({
+                                    "id": point_id,
+                                    "vector": vector,
+                                    "payload": {
+                                        "issue_number": st.session_state['current_issue_number'],
+                                        "date": datetime.now().strftime("%Y-%m-%d"),
+                                        "title": title,
+                                        "content": chunk,
+                                        "type": "past_newsletter_topic"
+                                    }
+                                })
+                            
+                            # 3. Upsert
+                            from qdrant_client.http import models as qmodels
+                            q_points = [qmodels.PointStruct(id=p['id'], vector=p['vector'], payload=p['payload']) for p in points]
+                            await vector_store.upsert(collection_name, q_points)
+                            
+                            # 4. Update history
+                            history_path = os.path.join(project_root, "data", "issue_history.json")
+                            curr_seq = int(st.session_state['current_issue_number'].split('-')[-1])
+                            with open(history_path, "w") as f:
+                                json.dump({"last_seq": curr_seq}, f)
+                                
+                            st.success(f"✅ 第 {st.session_state['current_issue_number']} 期已成功存檔至向量資料庫！")
+                        except Exception as e:
+                            st.error(f"存檔失敗: {e}")
+                
+                asyncio.run(finalize_and_index())
+
+            st.markdown("---")
             st.markdown(st.session_state['refined_newsletter'])
             
             # Fix: Encode content to bytes to avoid Streamlit MediaFileStorageError
             final_md_bytes = st.session_state['refined_newsletter'].encode('utf-8')
             
-            st.download_button(
-                label="📥 下載最終版 Markdown",
-                data=final_md_bytes,
-                file_name=f"newsletter_FINAL_{datetime.now().strftime('%Y%m%d')}.md",
-                mime="text/markdown"
-            )
+            col_dl1, col_load2 = st.columns(2)
+            with col_dl1:
+                st.download_button(
+                    label="📥 下載最終版 Markdown",
+                    data=final_md_bytes,
+                    file_name=f"newsletter_FINAL_{datetime.now().strftime('%Y%m%d')}.md",
+                    mime="text/markdown",
+                    use_container_width=True
+                )
             
+            with col_load2:
+                # 生成 HTML 版本
+                try:
+                    import markdown
+                    html_content = markdown.markdown(st.session_state['refined_newsletter'], extensions=['tables', 'fenced_code'])
+                    # 加上簡單的 Email 樣式
+                    email_html = f"""
+                    <html>
+                    <head>
+                        <style>
+                            body {{ font-family: 'PingFang TC', 'Microsoft JhengHei', sans-serif; line-height: 1.6; color: #333; max-width: 800px; margin: 0 auto; padding: 20px; }}
+                            h1 {{ color: #1b8f7a; border-bottom: 2px solid #1b8f7a; padding-bottom: 10px; }}
+                            h2 {{ color: #1b8f7a; margin-top: 30px; }}
+                            a {{ color: #1b8f7a; text-decoration: none; }}
+                            a:hover {{ text-decoration: underline; }}
+                            code {{ background: #f4f4f4; padding: 2px 5px; border-radius: 3px; }}
+                            pre {{ background: #f4f4f4; padding: 15px; overflow-x: auto; border-radius: 5px; }}
+                            hr {{ border: 0; border-top: 1px solid #eee; margin: 40px 0; }}
+                        </style>
+                    </head>
+                    <body>
+                        {html_content}
+                    </body>
+                    </html>
+                    """
+                    st.download_button(
+                        label="📧 下載 Email HTML 版本",
+                        data=email_html.encode('utf-8'),
+                        file_name=f"newsletter_FINAL_{datetime.now().strftime('%Y%m%d')}.html",
+                        mime="text/html",
+                        use_container_width=True
+                    )
+                except ImportError:
+                    st.error("請先安裝 markdown 套件以匯出 HTML 版本。")
+
             if st.button("🗑️ 清空生成記錄"):
                 if 'final_newsletter' in st.session_state: del st.session_state['final_newsletter']
                 if 'refined_newsletter' in st.session_state: del st.session_state['refined_newsletter']
                 st.rerun()
+
+# --- TAB 6: Email Delivery ---
+with tab6:
+    st.header("✉️ 電子報發送系統")
+    
+    if 'refined_newsletter' not in st.session_state:
+        st.warning("請先在『生成電子報』頁面完成總編終審，產出最終版內容後再進行發送。")
+    else:
+        st.info(f"準備發送期刊號: **{st.session_state.get('current_issue_number', 'N/A')}**")
+        
+        # 1. Subscriber Stats
+        db = SubscriberDatabase()
+        
+        # UI: Add button to explicitly load stats, preventing hang on startup
+        if st.button("📊 載入/更新訂閱者數據", use_container_width=True):
+            try:
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                curr_issue = st.session_state.get('current_issue_number', 'N/A')
+                st.session_state['subscriber_stats'] = loop.run_until_complete(db.get_subscriber_stats(current_issue=curr_issue))
+                st.success("數據載入完成。")
+                st.rerun()
+            except Exception as e:
+                st.error(f"無法讀取訂閱者資料: {e}")
+        
+        if 'subscriber_stats' in st.session_state:
+            stats = st.session_state['subscriber_stats']
+            st.subheader("👥 訂閱者狀態")
+            col_stat1, col_stat2, col_stat3, col_stat4, col_stat5 = st.columns(5)
+            col_stat1.metric("總驗證人數", f"{stats.get('total_verified', 0)} 人")
+            col_stat2.metric("本期已寄送", f"{stats.get('already_sent', 0)} 人")
+            col_stat3.metric("技術開發者", f"{stats.get('developer', 0)} 人")
+            col_stat4.metric("商業決策者", f"{stats.get('business', 0)} 人")
+            col_stat5.metric("科技愛好者", f"{stats.get('hobbyist', 0)} 人")
+
+        st.divider()
+        
+        # 2. Email Preview & Config
+        st.subheader("📧 發送設定")
+        email_subject = st.text_input("郵件主旨", value=f"【鍛碼匠技術週報】Issue: {st.session_state.get('current_issue_number', 'N/A')}")
+        
+        # Generate full HTML for preview and sending
+        import markdown
+        html_body = markdown.markdown(st.session_state['refined_newsletter'], extensions=['tables', 'fenced_code'])
+        full_html = f"""
+        <html>
+        <head>
+            <style>
+                body {{ font-family: 'PingFang TC', 'Microsoft JhengHei', sans-serif; line-height: 1.6; color: #333; max-width: 800px; margin: 0 auto; padding: 20px; }}
+                h1 {{ color: #1b8f7a; border-bottom: 2px solid #1b8f7a; padding-bottom: 10px; }}
+                h2 {{ color: #1b8f7a; margin-top: 30px; }}
+                a {{ color: #1b8f7a; text-decoration: none; }}
+                code {{ background: #f4f4f4; padding: 2px 5px; border-radius: 3px; }}
+                hr {{ border: 0; border-top: 1px solid #eee; margin: 40px 0; }}
+            </style>
+        </head>
+        <body>
+            {html_body}
+        </body>
+        </html>
+        """
+
+        with st.expander("👀 預覽發送內容 (HTML)"):
+            st.components.v1.html(full_html, height=500, scrolling=True)
+
+        # 3. Send Logic
+        st.warning("⚠️ 點擊下方按鈕後，系統將正式對所有『已驗證』的會員發送郵件。請務必確認內容正確。")
+        
+        if st.button("🚀 正式群發電子報", type="primary", use_container_width=True):
+            async def run_delivery():
+                delivery_tool = EmailDeliveryTool()
+                db = SubscriberDatabase()
+                
+                with st.status("正在準備發送清單...", expanded=True) as status:
+                    # Fetch recipients (Excluding those who already received this issue)
+                    try:
+                        curr_issue = st.session_state.get('current_issue_number', 'N/A')
+                        subscribers = await db.get_verified_subscribers(exclude_issue=curr_issue)
+                        emails = [s['email'] for s in subscribers]
+                        total = len(emails)
+                        
+                        if total == 0:
+                            status.update(label=f"ℹ️ 本期 ({curr_issue}) 已無待發送名單 (所有人皆已寄送或無新訂閱者)", state="complete")
+                            return
+
+                        status.write(f"✅ 找到 {total} 位尚未收到本期的訂閱者。開始透過 Brevo SMTP 發送...")
+                        
+                        # Perform delivery
+                        result = await delivery_tool.send_newsletter(emails, email_subject, full_html)
+                        
+                        if result["success"]:
+                            data = result["data"]
+                            success_count = data["success_count"]
+                            failed_count = len(data["failed_emails"])
+                            
+                            # --- NEW: Record successful sends in DB ---
+                            if success_count > 0:
+                                # Get list of successful emails
+                                failed_set = {f['email'] for f in data["failed_emails"]}
+                                successful_emails = [e for e in emails if e not in failed_set]
+                                await db.record_sent_emails(successful_emails, curr_issue)
+                                # Clear cache to refresh UI
+                                if 'subscriber_stats' in st.session_state: del st.session_state['subscriber_stats']
+                                status.write(f"📝 已將 {success_count} 筆發送紀錄更新至資料庫。")
+                            # ------------------------------------------
+
+                            status.update(label=f"🎉 發送完成！成功: {success_count}, 失敗: {failed_count}", state="complete")
+                        else:
+                            status.update(label=f"❌ 發送過程出錯: {result['error']}", state="error")
+                    except Exception as e:
+                        status.update(label=f"❌ 處理失敗: {e}", state="error")
+            
+            asyncio.run(run_delivery())

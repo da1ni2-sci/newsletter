@@ -1,17 +1,40 @@
 import json
 import re
-from typing import List, Dict, Any
-from app.core.interfaces import LLMProvider
+from typing import List, Dict, Any, Optional
+from app.core.interfaces import LLMProvider, VectorStoreProvider, EmbeddingProvider
 
 class EditorAgent:
-    def __init__(self, llm: LLMProvider):
+    def __init__(self, llm: LLMProvider, vector_store: Optional[VectorStoreProvider] = None, embedding: Optional[EmbeddingProvider] = None):
         self.llm = llm
+        self.vector_store = vector_store
+        self.embedding = embedding
 
     async def select_top_topics(self, clusters: List[Dict[str, Any]], num_select: int = 5) -> List[Dict[str, Any]]:
         """
         Uses LLM to evaluate top clusters and select the best ones.
+        NEW: Checks past finalized newsletters to avoid duplicates and suggest extensions.
         """
-        # 1. Prepare candidates (Top 50 from UI)
+        # 1. Check for historical overlaps (if DB is available)
+        history_context = ""
+        if self.vector_store and self.embedding:
+            print("DEBUG: Checking historical overlaps for candidates...")
+            overlaps = []
+            for cluster in clusters[:15]: # Only check top 15 candidates to save time
+                title = cluster['representative_title']
+                query_vec = await self.embedding.embed_query(title)
+                hits = await self.vector_store.search("finalized_newsletters", query_vec, limit=1)
+                if hits and hits[0]['score'] > 0.85: # High similarity threshold
+                    payload = hits[0]['payload']
+                    overlaps.append(f"- Topic '{title}' is similar to Issue {payload.get('issue_number')} ('{payload.get('title')}')")
+                    cluster['past_reference'] = {
+                        "issue": payload.get('issue_number'),
+                        "title": payload.get('title'),
+                        "score": hits[0]['score']
+                    }
+            if overlaps:
+                history_context = "\n**PAST COVERAGE ALERTS:**\n" + "\n".join(overlaps) + "\n"
+
+        # 2. Prepare candidates (Top 50 from UI)
         candidates = clusters 
         
         context_str = ""
@@ -40,11 +63,19 @@ class EditorAgent:
         user_prompt = f"""
 Select exactly {num_select} topics from the list below. 
 
+{history_context}
+
 **CRITICAL SELECTION CRITERIA (The "Synthesis Value"):**
-1. **Diversity is King**: PRIORITIZE clusters that combine materials from DIFFERENT sources (e.g., Reddit discussions + Arxiv papers + Tech Blogs).
-2. **Cross-Pollination**: Look for topics where these diverse sources CONFIRM, CONTRADICT, or COMPLEMENT each other. This creates a richer, more engaging narrative.
-3. **Avoid Monoculture**: A cluster with 10 articles all from the same blog is boring. A cluster with 3 articles from 3 different domains (Engineering vs. Academic vs. Social) is GOLD.
-4. **Coherence**: Ensure the diverse articles actually talk about the same core innovation or event.
+1. **Audience Balance (FORDIGE STRATEGY)**: We serve three distinct groups. Ensure your selection represents a mix:
+   - **🧑‍💻 Tech Developers**: Deep technical breakdowns, "hardcore" repos, architecture. (Aim for 2 articles)
+   - **💼 Business Deciders**: Practical applications, ROI of AI, industry trends, implementation costs. (Aim for 2 articles)
+   - **🧐 Tech Hobbyists**: "Tech Trivia", interesting news, future-gazing, "Did you know?" stuff. (Aim for 1 article)
+2. **Handle Repetition**: If a topic is marked as SIMILAR to past coverage:
+   - If there is NO NEW significant update, DISCARD it.
+   - If there IS a major update, select it but emphasize it as an "EXTENDED UPDATE" or "REVISITING" in your reason.
+3. **Diversity is King**: PRIORITIZE clusters that combine materials from DIFFERENT sources.
+4. **Cross-Pollination**: Look for topics where sources CONFIRM, CONTRADICT, or COMPLEMENT each other. 
+5. **Coherence**: Ensure the diverse articles actually talk about the same core innovation or event.
 
 Candidates:
 {context_str}
@@ -54,8 +85,10 @@ Output Format (STRICT JSON):
     "selections": [
         {{ 
             "id": 0, 
-            "reason": "Explain WHY this was selected. Mention the diversity of sources (e.g. 'Combines Reddit debate with Arxiv proof').",
-            "editor_title": "A specific, punchy title for this narrative"
+            "audience_tag": "Tech Developer | Business Decider | Tech Hobbyist",
+            "is_update": true/false,
+            "reason": "Explain WHY this was selected. If it's an update, mention the previous coverage.",
+            "editor_title": "A specific, punchy magazine-style title"
         }}
     ]
 }}

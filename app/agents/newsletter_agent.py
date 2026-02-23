@@ -1,5 +1,7 @@
 from typing import List, Dict, Any, Optional
 from app.core.interfaces import LLMProvider, VectorStoreProvider, EmbeddingProvider
+# Import the new Research Tools
+from app.tools.research_tools import ResearchAgent, WebSearchTool
 
 class NewsletterAgent:
     def __init__(
@@ -13,67 +15,66 @@ class NewsletterAgent:
         self.vector_store = vector_store
         self.embedding = embedding
         self.collection_name = collection_name
+        # Initialize Research Agent
+        self.research_agent = ResearchAgent(llm)
+        self.web_tool = WebSearchTool() # Placeholder for actual search implementation
 
-    async def generate_newsletter(self, topic: str, num_articles: int = 5) -> str:
-        # 1. Retrieve relevant articles from Vector Store
-        query_vector = await self.embedding.embed_query(topic)
-        search_results = await self.vector_store.search(
-            collection_name=self.collection_name,
-            query_vector=query_vector,
-            limit=num_articles
-        )
-
-        if not search_results:
-            return f"No articles found about '{topic}' in the database."
-
-        # 2. Format context for LLM
-        context_parts = []
-        for i, hit in enumerate(search_results):
-            payload = hit['payload']
-            metadata = []
-            if payload.get('author'): metadata.append(f"Author: {payload['author']}")
-            if payload.get('upvotes'): metadata.append(f"Upvotes: {payload['upvotes']}")
-            if payload.get('github_stars'): metadata.append(f"GitHub Stars: {payload['github_stars']}")
-            
-            metadata_str = " | ".join(metadata)
-            
-            context_parts.append(
-                f"--- Article {i+1} ---\n"
-                f"Title: {payload.get('title')}\n"
-                f"Metadata: {metadata_str}\n"
-                f"Summary: {payload.get('summary')}\n"
-                f"Link: {payload.get('link')}\n"
-            )
+    async def _perform_deep_research(self, topic: Dict[str, Any]) -> str:
+        """
+        Orchestrates the multi-step deep retrieval process.
+        1. Formulate Queries
+        2. (Mock) Execute Search - In production, this needs a real Search API key (SerpAPI/Google).
+        3. Fetch Content
+        4. Summarize
+        """
+        title = topic.get('display_title') or topic['representative_title']
+        summary = topic.get('summary', '')
         
-        context_text = "\n".join(context_parts)
-
-        # 3. Create Prompt
-        system_prompt = (
-            "你是一位專業的科技電子報編輯。你的目標是為讀者篩選並總結最重要的此主題新聞。"
-            "請使用繁體中文 (Traditional Chinese) 撰寫，風格專業、引人入勝且簡潔。"
-        )
+        # 1. Formulate Queries
+        queries = await self.research_agent.formulate_queries(title, summary)
+        print(f"DEBUG: Generated queries for '{title}': {queries}")
         
-        user_prompt = (
-            f"根據以下關於 '{topic}' 的新聞文章，請撰寫一份電子報草稿。"
-            "對於每篇文章，請提供一個吸引人的標題、簡短摘要（2-3 句話）以及原文連結。"
-            "最後，請針對整體主題撰寫一段 '為什麼這很重要 (Why this matters)' 的結語。\n\n"
-            "參考內容 (CONTEXT):\n"
-            f"{context_text}\n\n"
-            "電子報輸出 (Markdown 格式):"
-        )
-
-        # 4. Generate with LLM
-        response = await self.llm.generate(prompt=user_prompt, system_prompt=system_prompt)
-        return response
+        # 2. Execute Search (Real SerpAPI + Playwright)
+        print(f"DEBUG: Executing Search for queries: {queries}")
+        results = []
+        # Limit to first query to save time/tokens if needed, or loop all. 
+        # Let's do all queries but limit results per query.
+        for q in queries:
+            search_hits = await self.web_tool.search_google(q)
+            # Take top 1 result per query to keep it fast
+            for hit in search_hits[:1]:
+                content = await self.web_tool.fetch_page_content(hit['url'])
+                if content:
+                    hit['content'] = content
+                    results.append(hit)
+        
+        # 3. Summarize Results
+        if results:
+            research_notes = await self.research_agent.summarize_search_results(results)
+        else:
+            research_notes = f"Deep Research attempted queries: {queries}, but found no accessible content."
+        
+        return research_notes
 
     async def synthesize_topic_article(self, topic: Dict[str, Any]) -> str:
         """
         Synthesizes raw cluster content into a high-quality article using Adversarial Editing.
-        Cycle: Draft -> Critique -> Final.
+        Cycle: Research (if missing) -> Draft -> Critique -> Final.
         """
         title = topic.get('display_title') or topic['representative_title']
-        research_report = topic.get('research_report', 'No additional research provided.')
         
+        # --- NEW: Check if Research Report already exists (Manual or from Phase 2) ---
+        research_report = topic.get('research_report', '').strip()
+        
+        if not research_report or "Deep Research Active" in research_report:
+            print(f"--- Starting Deep Retrieval for {title} ---")
+            deep_research_report = await self._perform_deep_research(topic)
+            topic['research_report'] = deep_research_report
+            research_report = deep_research_report
+        else:
+            print(f"--- Using existing Research Report for {title} ---")
+        # ---------------------------------------------------------------------------
+
         # 1. Prepare Materials
         raw_materials = []
         for art in topic['articles']:
